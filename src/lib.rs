@@ -437,9 +437,6 @@ unsafe extern "C" fn _start() -> ! {
             .endif
 
         _abs_start:
-            .cfi_startproc
-            .cfi_undefined ra
-
             csrw mie, 0
             csrw mip, 0
 
@@ -508,10 +505,9 @@ unsafe extern "C" fn _start() -> ! {
             add s0, sp, zero
 
             jal zero, _start_rust
+
         3:
             call abort
-
-            .cfi_endproc
         ",
         HAS_MUL = const cfg!(target_feature = "m") as u32,
     );
