@@ -329,6 +329,8 @@
 // NOTE: Adapted from cortex-m/src/lib.rs
 #![no_std]
 #![deny(missing_docs)]
+#![feature(asm)]
+#![feature(naked_functions)]
 
 extern crate r0;
 extern crate riscv;
@@ -341,6 +343,259 @@ use riscv::register::mcause;
 #[export_name = "error: riscv-rt appears more than once in the dependency graph"]
 #[doc(hidden)]
 pub static __ONCE__: () = ();
+
+/// `XLEN / 8`
+const X_SIZE: usize = core::mem::size_of::<usize>();
+
+macro_rules! rv_asm {
+    ($code:literal $($tt:tt)*) => {
+        asm!(
+            concat!(r"
+                .ifndef load_store_defined
+                    .set load_store_defined, 1
+                    .if {XLEN} == 32
+                        .macro LOAD p:vararg
+                            lw \p
+                        .endm
+                        .macro STORE p:vararg
+                            sw \p
+                        .endm
+                        .macro C.LOAD p:vararg
+                            c.lw \p
+                        .endm
+                        .macro C.STORE p:vararg
+                            c.sw \p
+                        .endm
+                    .endif
+                    .if {XLEN} == 64
+                        .macro LOAD p:vararg
+                            ld \p
+                        .endm
+                        .macro STORE p:vararg
+                            sd \p
+                        .endm
+                        .macro C.LOAD p:vararg
+                            c.ld \p
+                        .endm
+                        .macro C.STORE p:vararg
+                            c.sd \p
+                        .endm
+                    .endif
+                    .if {XLEN} == 128
+                        .macro LOAD p:vararg
+                            lq \p
+                        .endm
+                        .macro STORE p:vararg
+                            sq \p
+                        .endm
+                        .macro C.LOAD p:vararg
+                            c.lq \p
+                        .endm
+                        .macro C.STORE p:vararg
+                            c.sq \p
+                        .endm
+                    .endif
+                .endif
+            ", $code)
+            $($tt)*
+            XLEN = const X_SIZE * 8,
+            options(noreturn),
+        )
+    };
+}
+
+/// Entry point of all programs (_start).
+///
+/// It initializes DWARF call frame information, the stack pointer, the
+/// frame pointer (needed for closures to work in start_rust) and the global
+/// pointer. Then it calls _start_rust.
+#[naked]
+#[no_mangle]
+#[link_section = ".init"]
+unsafe extern "C" fn _start() -> ! {
+    rv_asm!(
+        "
+            /* Jump to the absolute address defined by the linker script. */
+            // for 32bit
+            .if {XLEN} == 32
+            lui ra, %hi(_abs_start)
+            jr %lo(_abs_start)(ra)
+            .endif
+
+            // for 64bit
+            .if {XLEN} == 64
+        .option push
+        .option norelax // to prevent an unsupported R_RISCV_ALIGN relocation from being generated
+        1:
+            auipc ra, %pcrel_hi(1f)
+            ld ra, %pcrel_lo(1b)(ra)
+            jr ra
+            .align  3
+        1:
+            .dword _abs_start
+        .option pop
+            .endif
+
+        _abs_start:
+            .cfi_startproc
+            .cfi_undefined ra
+
+            csrw mie, 0
+            csrw mip, 0
+
+            li  x1, 0
+            li  x2, 0
+            li  x3, 0
+            li  x4, 0
+            li  x5, 0
+            li  x6, 0
+            li  x7, 0
+            li  x8, 0
+            li  x9, 0
+            li  x10,0
+            li  x11,0
+            li  x12,0
+            li  x13,0
+            li  x14,0
+            li  x15,0
+            li  x16,0
+            li  x17,0
+            li  x18,0
+            li  x19,0
+            li  x20,0
+            li  x21,0
+            li  x22,0
+            li  x23,0
+            li  x24,0
+            li  x25,0
+            li  x26,0
+            li  x27,0
+            li  x28,0
+            li  x29,0
+            li  x30,0
+            li  x31,0
+
+            .option push
+            .option norelax
+            la gp, __global_pointer$
+            .option pop
+
+            // Check hart id
+            csrr a2, mhartid
+            lui t0, %hi(_max_hart_id)
+            add t0, t0, %lo(_max_hart_id)
+            bgtu a2, t0, 3f
+
+            // Allocate stacks
+            la sp, _stack_start
+            lui t0, %hi(_hart_stack_size)
+            add t0, t0, %lo(_hart_stack_size)
+        .if {HAS_MUL}
+            mul t0, a2, t0
+        .else
+            beqz a2, 2f  // Jump if single-hart
+            mv t1, a2
+            mv t2, t0
+        1:
+            add t0, t0, t2
+            addi t1, t1, -1
+            bnez t1, 1b
+        2:
+        .endif
+            sub sp, sp, t0
+
+            // Set frame pointer
+            add s0, sp, zero
+
+            jal zero, _start_rust
+        3:
+            call abort
+
+            .cfi_endproc
+        ",
+        HAS_MUL = const cfg!(target_feature = "m") as u32,
+    );
+}
+
+/// Trap entry point (_start_trap)
+///
+/// Saves caller saved registers ra, t0..6, a0..7, calls _start_trap_rust,
+/// restores caller saved registers and then returns.
+#[naked]
+#[no_mangle]
+#[link_section = ".trap"]
+unsafe extern "C" fn _start_trap() -> ! {
+    rv_asm!(
+        "
+        /* Make it .weak so PAC/HAL can provide their own if needed. */
+        .weak _start_trap
+            addi sp, sp, -16*{X_SIZE}
+
+            STORE ra, 0*{X_SIZE}(sp)
+            STORE t0, 1*{X_SIZE}(sp)
+            STORE t1, 2*{X_SIZE}(sp)
+            STORE t2, 3*{X_SIZE}(sp)
+            STORE t3, 4*{X_SIZE}(sp)
+            STORE t4, 5*{X_SIZE}(sp)
+            STORE t5, 6*{X_SIZE}(sp)
+            STORE t6, 7*{X_SIZE}(sp)
+            STORE a0, 8*{X_SIZE}(sp)
+            STORE a1, 9*{X_SIZE}(sp)
+            STORE a2, 10*{X_SIZE}(sp)
+            STORE a3, 11*{X_SIZE}(sp)
+            STORE a4, 12*{X_SIZE}(sp)
+            STORE a5, 13*{X_SIZE}(sp)
+            STORE a6, 14*{X_SIZE}(sp)
+            STORE a7, 15*{X_SIZE}(sp)
+
+            add a0, sp, zero
+            jal ra, _start_trap_rust
+
+            LOAD ra, 0*{X_SIZE}(sp)
+            LOAD t0, 1*{X_SIZE}(sp)
+            LOAD t1, 2*{X_SIZE}(sp)
+            LOAD t2, 3*{X_SIZE}(sp)
+            LOAD t3, 4*{X_SIZE}(sp)
+            LOAD t4, 5*{X_SIZE}(sp)
+            LOAD t5, 6*{X_SIZE}(sp)
+            LOAD t6, 7*{X_SIZE}(sp)
+            LOAD a0, 8*{X_SIZE}(sp)
+            LOAD a1, 9*{X_SIZE}(sp)
+            LOAD a2, 10*{X_SIZE}(sp)
+            LOAD a3, 11*{X_SIZE}(sp)
+            LOAD a4, 12*{X_SIZE}(sp)
+            LOAD a5, 13*{X_SIZE}(sp)
+            LOAD a6, 14*{X_SIZE}(sp)
+            LOAD a7, 15*{X_SIZE}(sp)
+
+            addi sp, sp, 16*{X_SIZE}
+            mret
+        ",
+        X_SIZE = const X_SIZE,
+    )
+}
+
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn default_setup_interrupts() {
+    asm!(
+        "
+            // Set trap handler
+            la t0, _start_trap
+            csrw mtvec, t0
+            ret
+        ",
+        options(noreturn)
+    );
+}
+
+/// Make sure there is an abort when linking
+#[no_mangle]
+extern "C" fn abort() {
+    loop {
+        unsafe { asm!("") };
+    }
+}
 
 extern "C" {
     // Boundaries of the .bss section
