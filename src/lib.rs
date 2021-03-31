@@ -412,6 +412,7 @@ macro_rules! rv_asm {
 #[naked]
 #[no_mangle]
 #[link_section = ".init"]
+#[cfg(riscv)]
 unsafe extern "C" fn _start() -> ! {
     rv_asm!(
         "
@@ -520,6 +521,7 @@ unsafe extern "C" fn _start() -> ! {
 #[naked]
 #[no_mangle]
 #[link_section = ".trap"]
+#[cfg(riscv)]
 unsafe extern "C" fn _start_trap() -> ! {
     rv_asm!(
         "
@@ -573,6 +575,7 @@ unsafe extern "C" fn _start_trap() -> ! {
 
 #[naked]
 #[no_mangle]
+#[cfg(riscv)]
 unsafe extern "C" fn default_setup_interrupts() {
     asm!(
         "
@@ -587,6 +590,7 @@ unsafe extern "C" fn default_setup_interrupts() {
 
 /// Make sure there is an abort when linking
 #[no_mangle]
+#[cfg(riscv)]
 extern "C" fn abort() {
     loop {
         unsafe { asm!("") };

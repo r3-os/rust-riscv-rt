@@ -17,4 +17,10 @@ fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=link.x");
+
+    let target = env::var("TARGET").unwrap();
+
+    if target.starts_with("riscv32") || target.starts_with("riscv64") {
+        println!("cargo:rustc-cfg=riscv");
+    }
 }
