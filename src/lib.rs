@@ -330,6 +330,8 @@
 #![no_std]
 #![deny(missing_docs)]
 #![feature(asm)]
+#![feature(asm_const)]
+#![feature(linkage)]
 #![feature(naked_functions)]
 
 extern crate r0;
@@ -413,6 +415,7 @@ macro_rules! rv_asm {
 #[no_mangle]
 #[link_section = ".init"]
 #[cfg(riscv)]
+#[allow(named_asm_labels)]
 unsafe extern "C" fn _start() -> ! {
     rv_asm!(
         "
@@ -521,12 +524,11 @@ unsafe extern "C" fn _start() -> ! {
 #[naked]
 #[no_mangle]
 #[link_section = ".trap"]
+#[linkage = "weak"] // Make it .weak so PAC/HAL can provide their own if needed.
 #[cfg(riscv)]
 unsafe extern "C" fn _start_trap() -> ! {
     rv_asm!(
         "
-        /* Make it .weak so PAC/HAL can provide their own if needed. */
-        .weak _start_trap
             addi sp, sp, -16*{X_SIZE}
 
             STORE ra, 0*{X_SIZE}(sp)
