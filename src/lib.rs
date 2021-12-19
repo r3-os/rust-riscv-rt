@@ -329,7 +329,6 @@
 // NOTE: Adapted from cortex-m/src/lib.rs
 #![no_std]
 #![deny(missing_docs)]
-#![feature(asm)]
 #![feature(asm_const)]
 #![feature(linkage)]
 #![feature(naked_functions)]
@@ -337,6 +336,8 @@
 extern crate r0;
 extern crate riscv;
 extern crate riscv_rt_macros as macros;
+
+use core::arch::asm;
 
 pub use macros::{entry, pre_init};
 
